@@ -1,6 +1,7 @@
 package makedict
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"crypto/sha1"
@@ -22,6 +23,7 @@ type Dict interface {
 	ToJSON() []byte
 	//How many words from source language
 	Size() int
+	Export(filePath string) (err error)
 }
 
 type DictSource struct {
@@ -62,6 +64,26 @@ func NewDict() Dict {
 
 func (d MemDict) Size() int {
 	return len(d.dict)
+}
+
+func (d MemDict) Export(filePath string) (err error) {
+	f, err := os.Create(filePath)
+	if err != nil {
+		return
+	}
+	w := bufio.NewWriter(f)
+
+	var buf bytes.Buffer
+	for key, variants := range d.dict {
+		for _, variant := range variants {
+			buf.Write([]byte(key + "\t"))
+			buf.Write(append(variant, '\n'))
+			w.Write(buf.Bytes())
+			buf.Reset()
+		}
+	}
+	err = w.Flush()
+	return
 }
 
 //implement Dict interface for MemDict

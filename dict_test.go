@@ -24,10 +24,10 @@ func TestDict(t *testing.T) {
 
 	dict, err := CreateDict("pt_en", getDictSources)
 	if err != nil {
-		t.Error(err)
+		t.Fatal(err)
 	}
 
-	wordsToFind := []string{"permitindo", "nos", "obras", "infelizmente", "conhecimento", "restrito", "contabilidade"}
+	wordsToFind := []string{"permitindo", "nos", "obras", "infelizmente", "conhecimento", "restrito", "contabilidade", "viver"}
 	for _, word := range wordsToFind {
 		suggestions := dict.Lookup(word)
 		fmt.Printf("%s -->  %s\n", word, strings.Join(suggestions, " | "))
@@ -35,4 +35,8 @@ func TestDict(t *testing.T) {
 
 	fmt.Println("Total keys:", dict.Size())
 	fmt.Println("Time Spent:", time.Since(start))
+	err = dict.Export("en_pt.dic")
+	if err != nil {
+		t.Error(err)
+	}
 }
