@@ -18,7 +18,9 @@ type Suggestion = string
 
 type Dict interface {
 	Lookup(word string) (suggestions []Suggestion)
-	AddRawDict(source []byte, format string) error
+	//Exist does not convert bytes variants to string
+	Exist(word string) (ok bool)
+	AddRawDict(source []byte, format DictSourceFormat) error
 	//Turn dictionary into JSON string with format { [key]: []string}
 	ToJSON() []byte
 	//How many words from source language
@@ -26,9 +28,14 @@ type Dict interface {
 	Export(filePath string) (err error)
 }
 
+type DictSourceFormat struct {
+	Source int
+	Target int
+}
+
 type DictSource struct {
 	Url    string
-	Format string
+	Format DictSourceFormat
 }
 
 type GetDictSourcesFunc func(langPair string) []DictSource
@@ -44,7 +51,13 @@ func CreateDict(langPair string, getUrls GetDictSourcesFunc) (dict Dict, err err
 			return
 		}
 
-		err = dict.AddRawDict(body, url.Format)
+		var format DictSourceFormat
+		format, err = GuessSourceDictFormat(body)
+		if err != nil {
+			return dict, err
+		}
+
+		err = dict.AddRawDict(body, format)
 		if err != nil {
 			return
 		}
@@ -94,6 +107,12 @@ func (d MemDict) Lookup(word string) (suggestions []Suggestion) {
 	return
 }
 
+//implement Dict interface for MemDict
+func (d MemDict) Exist(word string) (ok bool) {
+	_, ok = d.dict[word]
+	return
+}
+
 func (d MemDict) isVariantExist(word string, variant []byte) bool {
 	for _, suggestion := range d.dict[string(word)] {
 		if bytes.Equal(suggestion, variant) {
@@ -104,13 +123,19 @@ func (d MemDict) isVariantExist(word string, variant []byte) bool {
 }
 
 //TODO implement prasing different formats, right now noly two columns supported
-func (d MemDict) AddRawDict(source []byte, format string) error {
+func (d MemDict) AddRawDict(source []byte, format DictSourceFormat) error {
 	//parse source which is tsv file
-	lines := bytes.Split(source, []byte("\n"))
-	for _, line := range lines {
+	//TODO do not use split maybe it's potentialy slow
+	reader := bytes.NewReader(source)
+	lines := bufio.NewScanner(reader)
+	lines.Split(bufio.ScanLines)
+
+	for lines.Scan() {
+		line := lines.Bytes()
 		if len(line) == 0 {
 			continue
 		}
+
 		parts := bytes.Split(line, []byte("\t"))
 		if len(parts) < 1 {
 			return fmt.Errorf("invalid line: %s", line)
@@ -198,5 +223,10 @@ func ReadCache(url string) (content []byte, err error) {
 		err = nil
 		return
 	}
+	return
+}
+
+//try to guess format of dict source which is tsv file
+func GuessSourceDictFormat(sourceDict []byte) (format DictSourceFormat, err error) {
 	return
 }
