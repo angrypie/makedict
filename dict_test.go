@@ -73,6 +73,34 @@ func ScoreDictInWordList(wordListFile string, dict Dict) (score int, err error) 
 	return
 }
 
+func TestGuessFormat(t *testing.T) {
+	source, err := GetRawBody("https://object.pouta.csc.fi/OPUS-Wikipedia/v1.0/dic/en-pt.dic.gz")
+	if err != nil {
+		t.Error(err)
+	}
+
+	languages := searchLanguageByLangPair("por_eng")
+
+	languageFound := map[string]bool{"POR": false, "ENG": false}
+
+	for _, lang := range languages {
+		languageFound[lang.IsoCode639_3().String()] = true
+	}
+	for lang, found := range languageFound {
+		if !found {
+			t.Errorf("Language %s not found", lang)
+		}
+	}
+
+	format, err := GuessSourceDictFormat(source, languages)
+	if err != nil {
+		t.Error(err)
+	}
+
+	fmt.Println(format)
+
+}
+
 var testDictSourceUrl = []string{
 	"https://object.pouta.csc.fi/OPUS-TildeMODEL/v2018/dic/en-pt.dic.gz",
 	"https://object.pouta.csc.fi/OPUS-DGT/v2019/dic/en-pt.dic.gz",

@@ -10,8 +10,13 @@ import (
 	"fmt"
 	"io/fs"
 	"io/ioutil"
+	"log"
+	"math/rand"
 	"net/http"
 	"os"
+	"strings"
+
+	"github.com/pemistahl/lingua-go"
 )
 
 type Suggestion = string
@@ -28,10 +33,7 @@ type Dict interface {
 	Export(filePath string) (err error)
 }
 
-type DictSourceFormat struct {
-	Source int
-	Target int
-}
+type DictSourceFormat map[string]int
 
 type DictSource struct {
 	Url    string
@@ -52,7 +54,7 @@ func CreateDict(langPair string, getUrls GetDictSourcesFunc) (dict Dict, err err
 		}
 
 		var format DictSourceFormat
-		format, err = GuessSourceDictFormat(body)
+		format, err = GuessSourceDictFormat(body, searchLanguageByLangPair(langPair))
 		if err != nil {
 			return dict, err
 		}
@@ -61,6 +63,22 @@ func CreateDict(langPair string, getUrls GetDictSourcesFunc) (dict Dict, err err
 		if err != nil {
 			return
 		}
+	}
+	return
+}
+
+func searchLanguageByLangPair(langPair string) (langs []lingua.Language) {
+	index := map[string]struct{}{}
+	for _, part := range strings.Split(langPair, "_") {
+		index[strings.ToUpper(part)] = struct{}{}
+	}
+
+	//Search lingua.Language by IsoCode639_3code
+	for _, lang := range lingua.AllLanguages() {
+		if _, ok := index[lang.IsoCode639_3().String()]; !ok {
+			continue
+		}
+		langs = append(langs, lang)
 	}
 	return
 }
@@ -227,6 +245,64 @@ func ReadCache(url string) (content []byte, err error) {
 }
 
 //try to guess format of dict source which is tsv file
-func GuessSourceDictFormat(sourceDict []byte) (format DictSourceFormat, err error) {
+func GuessSourceDictFormat(sourceDict []byte, langs []lingua.Language) (format DictSourceFormat, err error) {
+	if len(langs) < 0 {
+		err = fmt.Errorf("no languages provided")
+		return
+	}
+	reader := bytes.NewReader(sourceDict)
+	lines := bufio.NewScanner(reader)
+	lines.Split(bufio.ScanLines)
+
+	score := make(map[lingua.Language][]int)
+	//fore each lang create entry in score map
+	for _, lang := range langs {
+		score[lang] = []int{}
+	}
+
+	detector := lingua.NewLanguageDetectorBuilder().FromLanguages(langs...).Build()
+
+	for lines.Scan() {
+		if rand.Intn(100) != 0 {
+			continue
+		}
+		line := lines.Bytes()
+		for columnNumber, part := range bytes.Split(line, []byte("\t")) {
+			language, exists := detector.DetectLanguageOf(string(part))
+			if !exists {
+				continue
+			}
+			//add column number to score for each detecetd language
+			score[language] = append(score[language], columnNumber)
+		}
+	}
+
+	//loop over score map and find the lang with the most columns
+	format = DictSourceFormat{}
+	columnExist := make(map[int]struct{})
+	for lang, columns := range score {
+		column := mostFrequentNumber(columns)
+		//two languages cant have the same column number
+		if _, ok := columnExist[column]; ok {
+			err = errors.New("same column detected for different languages")
+			return
+		}
+		columnExist[column] = struct{}{}
+		format[lang.IsoCode639_3().String()] = column
+	}
+	return
+}
+
+//function that finds most frequent number in array
+func mostFrequentNumber(arr []int) (num int) {
+	log.Println(len(arr))
+	num = 0
+	m := make(map[int]int)
+	for _, v := range arr {
+		m[v]++
+		if m[v] > m[num] {
+			num = v
+		}
+	}
 	return
 }
