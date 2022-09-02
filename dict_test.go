@@ -9,26 +9,20 @@ import (
 	"time"
 )
 
-func TestLangDetection(t *testing.T) {
-
-}
-
 func TestDict(t *testing.T) {
 	start := time.Now()
-	getDictSources := func(langPair string) []DictSource {
-		return []DictSource{
-			{
-				Url:    "https://object.pouta.csc.fi/OPUS-OpenSubtitles/v2018/dic/en-pt.dic.gz",
-				Format: DictSourceFormat{},
-			},
-			{
-				Url:    "https://object.pouta.csc.fi/OPUS-TildeMODEL/v2018/dic/en-pt.dic.gz",
-				Format: DictSourceFormat{},
-			},
+	getDictSources := func(langPair string) (sources []DictSource) {
+
+		// for each testDictSourceUrl create DictSource and add to sources
+
+		for _, url := range testDictSourceUrls {
+			sources = append(sources, DictSource{Url: url})
 		}
+
+		return
 	}
 
-	dict, err := CreateDict("pt_en", getDictSources)
+	dict, err := CreateDict("por_eng", getDictSources)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +95,7 @@ func TestGuessFormat(t *testing.T) {
 
 }
 
-var testDictSourceUrl = []string{
+var testDictSourceUrls = []string{
 	"https://object.pouta.csc.fi/OPUS-TildeMODEL/v2018/dic/en-pt.dic.gz",
 	"https://object.pouta.csc.fi/OPUS-DGT/v2019/dic/en-pt.dic.gz",
 	"https://object.pouta.csc.fi/OPUS-SciELO/v1/dic/en-pt.dic.gz",

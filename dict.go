@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io/fs"
 	"io/ioutil"
-	"log"
 	"math/rand"
 	"net/http"
 	"os"
@@ -36,12 +35,12 @@ type Dict interface {
 type DictSourceFormat map[string]int
 
 type DictSource struct {
-	Url    string
-	Format DictSourceFormat
+	Url string
 }
 
 type GetDictSourcesFunc func(langPair string) []DictSource
 
+//CreateDict downloads dictionary sources and merges them together.
 func CreateDict(langPair string, getUrls GetDictSourcesFunc) (dict Dict, err error) {
 	dict = NewDict()
 	urls := getUrls(langPair)
@@ -52,11 +51,17 @@ func CreateDict(langPair string, getUrls GetDictSourcesFunc) (dict Dict, err err
 		if err != nil {
 			return
 		}
+		if len(body) == 0 {
+			fmt.Println("ERR empty body", url.Url)
+			continue
+		}
 
 		var format DictSourceFormat
 		format, err = GuessSourceDictFormat(body, searchLanguageByLangPair(langPair))
 		if err != nil {
-			return dict, err
+			err = fmt.Errorf("guessing source format for %s %w", url, err)
+			fmt.Println("ERR", err)
+			continue
 		}
 
 		err = dict.AddRawDict(body, format)
@@ -64,7 +69,7 @@ func CreateDict(langPair string, getUrls GetDictSourcesFunc) (dict Dict, err err
 			return
 		}
 	}
-	return
+	return dict, nil
 }
 
 func searchLanguageByLangPair(langPair string) (langs []lingua.Language) {
@@ -149,13 +154,15 @@ func (d MemDict) AddRawDict(source []byte, format DictSourceFormat) error {
 	lines.Split(bufio.ScanLines)
 
 	for lines.Scan() {
+		//TODO AddRawDict doing same thing, create guard function or iterator
+		//TODO it's files with single word columns separeted by space
 		line := lines.Bytes()
 		if len(line) == 0 {
 			continue
 		}
 
 		parts := bytes.Split(line, []byte("\t"))
-		if len(parts) < 1 {
+		if len(parts) < 2 {
 			return fmt.Errorf("invalid line: %s", line)
 		}
 
@@ -203,6 +210,7 @@ func GetRawBody(url string) (body []byte, err error) {
 
 //GetRawBodyHTTP mae GET request to url and returns body as a []bytes
 func GetRawBodyHTTP(url string) (body []byte, err error) {
+	fmt.Println("INFO loading dic tsource from", url)
 	resp, err := http.Get(url)
 	if err != nil {
 		return
@@ -266,8 +274,18 @@ func GuessSourceDictFormat(sourceDict []byte, langs []lingua.Language) (format D
 		if rand.Intn(100) != 0 {
 			continue
 		}
+		//TODO AddRawDict doing same thing, create guard function or iterator
+		//TODO it's files with single word columns separeted by space
 		line := lines.Bytes()
-		for columnNumber, part := range bytes.Split(line, []byte("\t")) {
+		if len(line) == 0 {
+			continue
+		}
+		parts := bytes.Split(line, []byte("\t"))
+		if len(parts) < 2 {
+			err = fmt.Errorf("invalid line: %s", line)
+			return
+		}
+		for columnNumber, part := range parts {
 			language, exists := detector.DetectLanguageOf(string(part))
 			if !exists {
 				continue
@@ -284,7 +302,7 @@ func GuessSourceDictFormat(sourceDict []byte, langs []lingua.Language) (format D
 		column := mostFrequentNumber(columns)
 		//two languages cant have the same column number
 		if _, ok := columnExist[column]; ok {
-			err = errors.New("same column detected for different languages")
+			err = errors.New("same column detected for different language")
 			return
 		}
 		columnExist[column] = struct{}{}
@@ -295,7 +313,6 @@ func GuessSourceDictFormat(sourceDict []byte, langs []lingua.Language) (format D
 
 //function that finds most frequent number in array
 func mostFrequentNumber(arr []int) (num int) {
-	log.Println(len(arr))
 	num = 0
 	m := make(map[int]int)
 	for _, v := range arr {
