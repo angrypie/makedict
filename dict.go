@@ -136,6 +136,7 @@ func (d MemDict) Exist(word string) (ok bool) {
 	return
 }
 
+//isVariantExist is faster than Lookup due to not converting bytes to string
 func (d MemDict) isVariantExist(word string, variant []byte) bool {
 	for _, suggestion := range d.dict[string(word)] {
 		if bytes.Equal(suggestion, variant) {
@@ -145,16 +146,23 @@ func (d MemDict) isVariantExist(word string, variant []byte) bool {
 	return false
 }
 
-//TODO implement prasing different formats, right now noly two columns supported
-func (d MemDict) AddRawDict(source []byte, format DictSourceFormat) error {
-	//parse source which is tsv file
-	//TODO do not use split maybe it's potentialy slow
+func readDictSourceByLine(
+	source []byte, newParts func(parts [][]byte) error, processRandomLines ...int,
+) (err error) {
 	reader := bytes.NewReader(source)
 	lines := bufio.NewScanner(reader)
 	lines.Split(bufio.ScanLines)
 
+	shouldProcessRandomLines := len(processRandomLines) > 0
+	processEveryNthLine := 0
+	if shouldProcessRandomLines {
+		processEveryNthLine = processRandomLines[0]
+	}
+
 	for lines.Scan() {
-		//TODO AddRawDict doing same thing, create guard function or iterator
+		if shouldProcessRandomLines && rand.Intn(processEveryNthLine) != 0 {
+			continue
+		}
 		//TODO it's files with single word columns separeted by space
 		line := lines.Bytes()
 		if len(line) == 0 {
@@ -163,22 +171,31 @@ func (d MemDict) AddRawDict(source []byte, format DictSourceFormat) error {
 
 		parts := bytes.Split(line, []byte("\t"))
 		if len(parts) < 2 {
-			return fmt.Errorf("invalid line: %s", line)
+			err = fmt.Errorf("invalid line: %s", line)
+			return
 		}
 
+		err = newParts(parts)
+		if err != nil {
+			return
+		}
+	}
+	return
+}
+
+func (d MemDict) AddRawDict(source []byte, format DictSourceFormat) error {
+	return readDictSourceByLine(source, func(parts [][]byte) (err error) {
 		//TODO Decide to use lowercase or not
 		word := string(bytes.ToLower(parts[3]))
 		variant := bytes.ToLower(parts[2])
-
-		// If variant elready exist
+		//break if word and exact variant elready exist
 		if d.isVariantExist(word, variant) {
-			continue
+			return
 		}
-
+		//add new word and variant or append new variant if key already exist
 		d.dict[word] = append(d.dict[word], variant)
-	}
-
-	return nil
+		return
+	})
 }
 
 func (d MemDict) ToJSON() []byte {
@@ -258,33 +275,14 @@ func GuessSourceDictFormat(sourceDict []byte, langs []lingua.Language) (format D
 		err = fmt.Errorf("no languages provided")
 		return
 	}
-	reader := bytes.NewReader(sourceDict)
-	lines := bufio.NewScanner(reader)
-	lines.Split(bufio.ScanLines)
-
 	score := make(map[lingua.Language][]int)
 	//fore each lang create entry in score map
 	for _, lang := range langs {
 		score[lang] = []int{}
 	}
-
 	detector := lingua.NewLanguageDetectorBuilder().FromLanguages(langs...).Build()
 
-	for lines.Scan() {
-		if rand.Intn(100) != 0 {
-			continue
-		}
-		//TODO AddRawDict doing same thing, create guard function or iterator
-		//TODO it's files with single word columns separeted by space
-		line := lines.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-		parts := bytes.Split(line, []byte("\t"))
-		if len(parts) < 2 {
-			err = fmt.Errorf("invalid line: %s", line)
-			return
-		}
+	err = readDictSourceByLine(sourceDict, func(parts [][]byte) (err error) {
 		for columnNumber, part := range parts {
 			language, exists := detector.DetectLanguageOf(string(part))
 			if !exists {
@@ -293,6 +291,10 @@ func GuessSourceDictFormat(sourceDict []byte, langs []lingua.Language) (format D
 			//add column number to score for each detecetd language
 			score[language] = append(score[language], columnNumber)
 		}
+		return
+	}, 100) //process only every 100th line, source dictionaries usually contains tousands
+	if err != nil {
+		return
 	}
 
 	//loop over score map and find the lang with the most columns

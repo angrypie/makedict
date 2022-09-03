@@ -3,11 +3,29 @@ package makedict
 import (
 	"bufio"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"testing"
 	"time"
 )
+
+func BenchmarkDict(b *testing.B) {
+	getDictSources := func(langPair string) (sources []DictSource) {
+		// for each testDictSourceUrl create DictSource and add to sources
+		for _, url := range testDictSourceUrls {
+			sources = append(sources, DictSource{Url: url})
+		}
+
+		return
+	}
+
+	_, err := CreateDict("por_eng", getDictSources)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+}
 
 func TestDict(t *testing.T) {
 	start := time.Now()
