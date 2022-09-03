@@ -91,7 +91,7 @@ func TestGuessFormat(t *testing.T) {
 		t.Error(err)
 	}
 
-	languages := searchLanguageByLangPair("por_eng")
+	languages := searchLanguageByLangPair([]string{"por", "eng"})
 
 	languageFound := map[string]bool{"POR": false, "ENG": false}
 

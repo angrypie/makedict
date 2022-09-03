@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io/fs"
 	"io/ioutil"
+	"log"
 	"math/rand"
 	"net/http"
 	"os"
@@ -42,7 +43,12 @@ type GetDictSourcesFunc func(langPair string) []DictSource
 
 //CreateDict downloads dictionary sources and merges them together.
 func CreateDict(langPair string, getUrls GetDictSourcesFunc) (dict Dict, err error) {
-	dict = NewDict()
+	langs := strings.Split(langPair, "_")
+	if len(langs) != 2 {
+		err = errors.New("lang pair should contain two language ISO_639_3 codes separated by _")
+		return
+	}
+	dict = NewDict(langs[0], langs[1])
 	urls := getUrls(langPair)
 	//download dict sources or retrive from cache
 	for _, url := range urls {
@@ -57,7 +63,7 @@ func CreateDict(langPair string, getUrls GetDictSourcesFunc) (dict Dict, err err
 		}
 
 		var format DictSourceFormat
-		format, err = GuessSourceDictFormat(body, searchLanguageByLangPair(langPair))
+		format, err = GuessSourceDictFormat(body, searchLanguageByLangPair(langs))
 		if err != nil {
 			err = fmt.Errorf("guessing source format for %s %w", url, err)
 			fmt.Println("ERR", err)
@@ -72,9 +78,10 @@ func CreateDict(langPair string, getUrls GetDictSourcesFunc) (dict Dict, err err
 	return dict, nil
 }
 
-func searchLanguageByLangPair(langPair string) (langs []lingua.Language) {
+//searchLanguageByLangPair searches lingua.Language based on ISO_639_3 codes
+func searchLanguageByLangPair(codes []string) (langs []lingua.Language) {
 	index := map[string]struct{}{}
-	for _, part := range strings.Split(langPair, "_") {
+	for _, part := range codes {
 		index[strings.ToUpper(part)] = struct{}{}
 	}
 
@@ -89,12 +96,17 @@ func searchLanguageByLangPair(langPair string) (langs []lingua.Language) {
 }
 
 type MemDict struct {
-	dict map[string][][]byte
+	dict       map[string][][]byte
+	sourceLang string
+	targetLang string
 }
 
-func NewDict() Dict {
+//TODO introduce type for languages to be sure that it's compatible with ISO_639_3
+func NewDict(source, target string) Dict {
 	return MemDict{
-		dict: make(map[string][][]byte),
+		dict:       make(map[string][][]byte),
+		sourceLang: strings.ToUpper(source),
+		targetLang: strings.ToUpper(target),
 	}
 }
 
@@ -146,6 +158,8 @@ func (d MemDict) isVariantExist(word string, variant []byte) bool {
 	return false
 }
 
+//read dictionary source line by line ignoring blank lines and not column based format
+//starts from tsv with tabs as separators but falls back to spaces if tabs not detected
 func readDictSourceByLine(
 	source []byte, newParts func(parts [][]byte) error, processRandomLines ...int,
 ) (err error) {
@@ -159,6 +173,7 @@ func readDictSourceByLine(
 		processEveryNthLine = processRandomLines[0]
 	}
 
+	lineSeparator := []byte("\t")
 	for lines.Scan() {
 		if shouldProcessRandomLines && rand.Intn(processEveryNthLine) != 0 {
 			continue
@@ -169,10 +184,15 @@ func readDictSourceByLine(
 			continue
 		}
 
-		parts := bytes.Split(line, []byte("\t"))
+		parts := bytes.Split(line, lineSeparator)
 		if len(parts) < 2 {
-			err = fmt.Errorf("invalid line: %s", line)
-			return
+			parts = bytes.Split(line, []byte(" "))
+			if len(parts) < 2 {
+				err = fmt.Errorf("invalid line: %s", line)
+				return
+			}
+			lineSeparator = []byte(" ")
+			log.Println("INFO new TSV separator chosen")
 		}
 
 		err = newParts(parts)
@@ -184,14 +204,18 @@ func readDictSourceByLine(
 }
 
 func (d MemDict) AddRawDict(source []byte, format DictSourceFormat) error {
+	targetColumn := format[d.targetLang]
+	sourceColumn := format[d.sourceLang]
 	return readDictSourceByLine(source, func(parts [][]byte) (err error) {
 		//TODO Decide to use lowercase or not
-		word := string(bytes.ToLower(parts[3]))
-		variant := bytes.ToLower(parts[2])
+		word := string(bytes.ToLower(parts[sourceColumn]))
+		variant := bytes.ToLower(parts[targetColumn])
 		//break if word and exact variant elready exist
 		if d.isVariantExist(word, variant) {
 			return
 		}
+		//TODO source dictionary still contains words on from different launguages
+		//should we bother to remove them for now, it's maybe like 10% of the space?
 		//add new word and variant or append new variant if key already exist
 		d.dict[word] = append(d.dict[word], variant)
 		return
@@ -280,6 +304,7 @@ func GuessSourceDictFormat(sourceDict []byte, langs []lingua.Language) (format D
 	for _, lang := range langs {
 		score[lang] = []int{}
 	}
+
 	detector := lingua.NewLanguageDetectorBuilder().FromLanguages(langs...).Build()
 
 	err = readDictSourceByLine(sourceDict, func(parts [][]byte) (err error) {
