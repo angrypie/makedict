@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io/fs"
 	"io/ioutil"
-	"log"
 	"math/rand"
 	"net/http"
 	"os"
@@ -123,12 +122,13 @@ func (d MemDict) Export(filePath string) (err error) {
 
 	var buf bytes.Buffer
 	for key, variants := range d.dict {
-		for _, variant := range variants {
-			buf.Write([]byte(key + "\t"))
-			buf.Write(append(variant, '\n'))
-			w.Write(buf.Bytes())
-			buf.Reset()
-		}
+		variants := bytes.Join(variants, []byte{'\t'})
+
+		buf.Write([]byte(key + "\t"))
+		buf.Write(variants)
+		buf.Write([]byte{'\n'})
+		w.Write(buf.Bytes())
+		buf.Reset()
 	}
 	err = w.Flush()
 	return
@@ -192,7 +192,6 @@ func readDictSourceByLine(
 				return
 			}
 			lineSeparator = []byte(" ")
-			log.Println("INFO new TSV separator chosen")
 		}
 
 		err = newParts(parts)

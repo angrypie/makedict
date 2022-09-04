@@ -53,7 +53,7 @@ func TestDict(t *testing.T) {
 
 	fmt.Println("Total keys:", dict.Size())
 	fmt.Println("Time Spent:", time.Since(start))
-	err = dict.Export("en_pt.dic")
+	err = dict.Export("pt_en.dic")
 	if err != nil {
 		t.Error(err)
 	}
