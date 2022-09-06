@@ -48,7 +48,7 @@ func TestDict(t *testing.T) {
 	wordsToFind := []string{"permitindo", "nos", "obras", "infelizmente", "conhecimento", "restrito", "contabilidade", "viver"}
 	for _, word := range wordsToFind {
 		suggestions := dict.Lookup(word)
-		fmt.Printf("%s -->  %s\n", word, strings.Join(suggestions, " | "))
+		fmt.Printf("%s -->  %+v\n", word, suggestions)
 	}
 
 	fmt.Println("Total keys:", dict.Size())
@@ -110,7 +110,6 @@ func TestGuessFormat(t *testing.T) {
 	}
 
 	fmt.Println(format)
-
 }
 
 var testDictSourceUrls = []string{
@@ -135,4 +134,37 @@ var testDictSourceUrls = []string{
 	"https://object.pouta.csc.fi/OPUS-ELRA-W0246/v1/dic/en-pt.dic.gz",
 	"https://object.pouta.csc.fi/OPUS-ELRC_2923/v1/dic/en-pt.dic.gz",
 	"https://object.pouta.csc.fi/OPUS-Ubuntu/v14.10/dic/en-pt.dic.gz",
+}
+
+func TestVariantScore(t *testing.T) {
+	dict := NewDict("POR", "ENG")
+	//add words and variants to dict
+	source := map[string][]string{
+		"permitindo": {"allowing", "letting", "permitting", "allowing", "letting", "allowing"},
+	}
+
+	for word, variants := range source {
+		for _, variant := range variants {
+			dict.AddVariant(word, variant)
+		}
+	}
+
+	suggestions := dict.Lookup("permitindo")
+
+	if len(suggestions) != 3 {
+		t.Error("Expected 3 suggestions")
+	}
+
+	for _, suggestion := range suggestions {
+		if suggestion.Variant == "letting" && suggestion.Score != 2 {
+			t.Error("Expected score 2 for 'letting'")
+		}
+		if suggestion.Variant == "allowing" && suggestion.Score != 3 {
+			t.Error("Expected score 3 for 'allowing'")
+		}
+		if suggestion.Variant == "permitting" && suggestion.Score != 1 {
+			t.Error("Expected score 1 for 'permitting'")
+		}
+	}
+
 }

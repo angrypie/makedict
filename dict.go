@@ -13,14 +13,21 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+
+	"golang.org/x/exp/slices"
 
 	"github.com/pemistahl/lingua-go"
 )
 
-type Suggestion = string
+type Suggestion struct {
+	Variant string
+	Score   int
+}
 
 type Dict interface {
+	AddVariant(word string, variant string)
 	Lookup(word string) (suggestions []Suggestion)
 	//Exist does not convert bytes variants to string
 	Exist(word string) (ok bool)
@@ -94,8 +101,12 @@ func searchLanguageByLangPair(codes []string) (langs []lingua.Language) {
 	return
 }
 
+type Variant struct {
+	Score int
+}
+
 type MemDict struct {
-	dict       map[string][][]byte
+	index      map[string]map[string]Variant
 	sourceLang string
 	targetLang string
 }
@@ -103,14 +114,14 @@ type MemDict struct {
 //TODO introduce type for languages to be sure that it's compatible with ISO_639_3
 func NewDict(source, target string) Dict {
 	return MemDict{
-		dict:       make(map[string][][]byte),
+		index:      make(map[string]map[string]Variant),
 		sourceLang: strings.ToUpper(source),
 		targetLang: strings.ToUpper(target),
 	}
 }
 
 func (d MemDict) Size() int {
-	return len(d.dict)
+	return len(d.index)
 }
 
 func (d MemDict) Export(filePath string) (err error) {
@@ -120,14 +131,35 @@ func (d MemDict) Export(filePath string) (err error) {
 	}
 	w := bufio.NewWriter(f)
 
-	var buf bytes.Buffer
-	for key, variants := range d.dict {
-		variants := bytes.Join(variants, []byte{'\t'})
+	var buf strings.Builder
+	const separator = "\t"
+	const newLine = "\n"
+	for key, variants := range d.index {
 
-		buf.Write([]byte(key + "\t"))
-		buf.Write(variants)
-		buf.Write([]byte{'\n'})
-		w.Write(buf.Bytes())
+		//convert variants map to slice
+		var suggestions []Suggestion
+		for variant, v := range variants {
+			suggestions = append(suggestions, Suggestion{
+				Variant: variant,
+				Score:   v.Score,
+			})
+		}
+
+		//make most popular word appear first
+		slices.SortFunc(suggestions, func(i, j Suggestion) bool {
+			return i.Score > j.Score
+		})
+
+		buf.WriteString(key)
+		for _, v := range suggestions {
+			buf.WriteString(separator)
+			buf.WriteString(v.Variant)
+			buf.WriteString(separator)
+			buf.WriteString(strconv.Itoa(v.Score))
+		}
+		buf.WriteString(newLine)
+
+		w.WriteString(buf.String())
 		buf.Reset()
 	}
 	err = w.Flush()
@@ -136,26 +168,39 @@ func (d MemDict) Export(filePath string) (err error) {
 
 //implement Dict interface for MemDict
 func (d MemDict) Lookup(word string) (suggestions []Suggestion) {
-	for _, variant := range d.dict[word] {
-		suggestions = append(suggestions, string(variant))
+	for value, variant := range d.index[word] {
+		suggestions = append(suggestions, Suggestion{
+			Variant: value,
+			Score:   variant.Score,
+		})
 	}
 	return
 }
 
 //implement Dict interface for MemDict
 func (d MemDict) Exist(word string) (ok bool) {
-	_, ok = d.dict[word]
+	_, ok = d.index[word]
 	return
 }
 
 //isVariantExist is faster than Lookup due to not converting bytes to string
-func (d MemDict) isVariantExist(word string, variant []byte) bool {
-	for _, suggestion := range d.dict[string(word)] {
-		if bytes.Equal(suggestion, variant) {
-			return true
-		}
+func (d MemDict) VariantExist(word string, variant string) (ok bool) {
+	variants, ok := d.index[word]
+	if !ok {
+		return
 	}
-	return false
+	_, ok = variants[variant]
+	return
+}
+
+func (d MemDict) AddVariant(word string, variant string) {
+	variants, ok := d.index[word]
+	if !ok {
+		variants = make(map[string]Variant)
+		d.index[word] = variants
+	}
+
+	variants[variant] = Variant{Score: variants[variant].Score + 1}
 }
 
 //read dictionary source line by line ignoring blank lines and not column based format
@@ -208,21 +253,17 @@ func (d MemDict) AddRawDict(source []byte, format DictSourceFormat) error {
 	return readDictSourceByLine(source, func(parts [][]byte) (err error) {
 		//TODO Decide to use lowercase or not
 		word := string(bytes.ToLower(parts[sourceColumn]))
-		variant := bytes.ToLower(parts[targetColumn])
-		//break if word and exact variant elready exist
-		if d.isVariantExist(word, variant) {
-			return
-		}
+		variant := string(bytes.ToLower(parts[targetColumn]))
 		//TODO source dictionary still contains words on from different launguages
 		//should we bother to remove them for now, it's maybe like 10% of the space?
 		//add new word and variant or append new variant if key already exist
-		d.dict[word] = append(d.dict[word], variant)
+		d.AddVariant(word, variant)
 		return
 	})
 }
 
 func (d MemDict) ToJSON() []byte {
-	str, _ := json.Marshal(d.dict)
+	str, _ := json.Marshal(d.index)
 	return str
 }
 
