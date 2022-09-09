@@ -307,8 +307,12 @@ func GetRawBodyHTTP(url string) (body []byte, err error) {
 }
 
 func WriteCache(url string, content []byte) (err error) {
-	sum := getCacheFileName(url)
-	f, err := os.Create(sum)
+	cacheFilePath, cacheDir := getCacheFileName(url)
+	err = os.MkdirAll(cacheDir, 0755)
+	if err != nil {
+		return
+	}
+	f, err := os.Create(cacheFilePath)
 	if err != nil {
 		return
 	}
@@ -318,13 +322,14 @@ func WriteCache(url string, content []byte) (err error) {
 	return
 }
 
-func getCacheFileName(url string) string {
-	sum := sha1.Sum([]byte(url))
-	return fmt.Sprintf("source_cache_%x", sum)
+func getCacheFileName(url string) (cacheFilePath, cacheDir string) {
+	cacheDir = ".cache"
+	cacheFilePath = fmt.Sprintf("%s/source_cache_%x", cacheDir, sha1.Sum([]byte(url)))
+	return
 }
 
 func ReadCache(url string) (content []byte, err error) {
-	sum := getCacheFileName(url)
+	sum, _ := getCacheFileName(url)
 	content, err = ioutil.ReadFile(sum)
 	if errors.Is(err, fs.ErrNotExist) {
 		err = nil
